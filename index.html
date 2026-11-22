@@ -185,7 +185,7 @@
     /**
      * =========================================================================
      * TRITAS TEST — INFORMATIKA (SMA KELAS XI FASE F)
-     * Single-file ANBK-inspired CBT Application + Bank Soal & Pembuat Soal (v10)
+     * Single-file ANBK-inspired CBT Application + Bank Soal & Pembuat Soal (v13)
      * Regulasi: Keputusan Kepala BSKAP Kemendikdasmen No. 046/H/KR/2025
      *           & Panduan Pembelajaran dan Asesmen (PPA) Edisi Revisi 2025
      * =========================================================================
@@ -195,7 +195,7 @@
     // ===== Penyimpanan terpusat Google Sheets =====
     // Tempel URL Web App Apps Script (berakhiran /exec) di antara tanda kutip.
     // Dikosongkan = aplikasi berjalan lokal seperti sebelumnya (tanpa server).
-    const CLOUD_URL_DEFAULT = '';
+    const CLOUD_URL_DEFAULT = 'https://script.google.com/macros/s/AKfycbxUgrQGvDkQq0KmzbyYySmBQxG9Wh05v8R0HoE1ZtiSMg93YKSxw88IOc7Nfdu7SfU/exec'; // satu mode: selalu terhubung ke server, semua data disinkronkan otomatis
     const CLOUD_URL = CLOUD_URL_DEFAULT || (function () { try { return (localStorage.getItem('tritas_cloud_url') || '').trim(); } catch (e) { return ''; } })();
 
     // Curriculum & Assessment Reference Catalog for SMA Kelas XI Fase F
@@ -890,6 +890,7 @@
         shuffleQuestions: true,
         shuffleOptions: true,
         showScoreToStudent: false,
+        showLoginToken: true,
         showKdToStudent: false,
         appSubtitle: 'Informatika SMA Kelas XI Fase F',
         examStart: '',
@@ -2802,6 +2803,30 @@
       if (!quiet) showToast('Data kelas dimuat ulang dari admin.', 'success');
     }
 
+    // v12: token ujian ditampilkan di layar login (dibuat guru/admin); dapat dimatikan di Pengaturan Ujian
+    function loginTokenRowsHtml(rows) {
+      const body = rows.length
+        ? rows.map((r) => `<div class="flex items-center justify-between gap-3 rounded-xl bg-white/10 px-3 py-2">${r.label ? `<span class="text-slate-200 leading-snug">${escapeHtml(r.label)}</span>` : '<span class="text-slate-300">Token</span>'}<span class="font-mono text-base font-extrabold tracking-[0.25em] text-amber-300">${escapeHtml(r.token)}</span></div>`).join('')
+        : '<div class="rounded-xl bg-white/10 px-3 py-2 text-slate-300">Belum ada paket ujian yang diaktifkan.</div>';
+      return `<div class="space-y-1.5 pt-1"><div class="text-[11px] font-bold uppercase tracking-wider text-sky-300">Token Ujian</div>${body}</div>`;
+    }
+    function loginTokenHtml() {
+      if (state.showLoginToken === false) return '';
+      if (CLOUD_URL) return '<div id="loginTokenBox"></div>'; // diisi dari server (lihat renderLoginView mode server)
+      const cfg = state.topikConfig || {};
+      const names = Object.keys(cfg);
+      let rows = [];
+      if (names.length) {
+        rows = names.filter((n) => (cfg[n] || {}).active && (cfg[n] || {}).token && questionsForTopik(n).length)
+          .map((n) => ({ label: n, token: String(cfg[n].token).toUpperCase() }));
+      } else if (state.examToken) {
+        rows = [{ label: '', token: String(state.examToken).toUpperCase() }];
+      }
+      const body = rows.length
+        ? rows.map((r) => `<div class="flex items-center justify-between gap-3 rounded-xl bg-white/10 px-3 py-2">${r.label ? `<span class="text-slate-200 leading-snug">${escapeHtml(r.label)}</span>` : '<span class="text-slate-300">Token</span>'}<span class="font-mono text-base font-extrabold tracking-[0.25em] text-amber-300">${escapeHtml(r.token)}</span></div>`).join('')
+        : '<div class="rounded-xl bg-white/10 px-3 py-2 text-slate-300">Belum ada paket ujian yang diaktifkan.</div>';
+      return `<div class="space-y-1.5 pt-1"><div class="text-[11px] font-bold uppercase tracking-wider text-sky-300">Token Ujian</div>${body}</div>`;
+    }
     function renderLoginView() {
       const container = document.getElementById('mainContainer');
       container.innerHTML = `
@@ -2820,30 +2845,21 @@
                 <h1 class="text-lg sm:text-xl font-extrabold tracking-tight leading-tight">
                   Portal Asesmen Digital Informatika
                 </h1>
+              <div class="relative z-10 rounded-2xl bg-white/10 backdrop-blur-xs border border-white/15 p-3 space-y-2.5 text-[11px]">
+                <div class="text-[11px] font-bold uppercase tracking-wider text-sky-300">Informasi Paket Aktif</div>
+                <div id="loginPaketName" class="text-sm font-extrabold leading-snug text-white">${escapeHtml(state.testName)}</div>
+                <div class="grid grid-cols-2 gap-2">
+                  <div class="rounded-xl bg-white/10 px-3 py-2"><div class="text-slate-300">Alokasi Waktu</div><div class="text-base font-extrabold text-white">${Number(state.durationMinutes)} <span class="text-[11px] font-semibold">Menit</span></div></div>
+                  <div class="rounded-xl bg-white/10 px-3 py-2"><div class="text-slate-300">Total Butir Soal</div><div class="text-base font-extrabold text-white">${state.questions.length} <span class="text-[11px] font-semibold">Butir</span></div></div>
+                </div>
+                ${loginTokenHtml()}
+              </div>
+
                 <p class="text-[11px] text-slate-300 leading-relaxed">
                   Platform ujian terpadu ${escapeHtml((state.appSubtitle || 'Informatika SMA Kelas XI Fase F'))}${state.schoolName ? ' — ' + escapeHtml(state.schoolName) : ''} selaras Keputusan Kepala BSKAP No. 046/H/KR/2025 &amp; Panduan Pembelajaran dan Asesmen Edisi Revisi 2025.
                 </p>
               </div>
 
-              <!-- Structured Session Metadata Card -->
-              <div class="relative z-10 rounded-2xl bg-white/10 backdrop-blur-xs border border-white/15 p-3 space-y-2 text-[11px]">
-                <div class="text-[11px] font-bold uppercase tracking-wider text-sky-300">Informasi Paket Aktif</div>
-                <div class="space-y-1.5 text-slate-200">
-                  <div class="flex items-start justify-between gap-3">
-                    <span class="text-slate-400 shrink-0">Paket Tes</span>
-                    <span class="font-semibold text-right leading-snug">${escapeHtml(state.testName)}</span>
-                  </div>
-                  <div class="flex items-center justify-between pt-2 border-t border-white/10">
-                    <span class="text-slate-400">Alokasi Waktu</span>
-                    <span class="font-bold text-white">${Number(state.durationMinutes)} Menit</span>
-                  </div>
-                  <div class="flex items-center justify-between">
-                    <span class="text-slate-400">Total Butir Soal</span>
-                    <span class="font-bold text-white">${state.questions.length} Butir</span>
-                  </div>
-                  
-                </div>
-              </div>
             </div>
 
             <!-- Right Authentication Form Panel -->
@@ -2882,21 +2898,8 @@
                 </button>
               </form>
               <p class="text-[11px] text-slate-500 mt-3">Lupa kata sandi atau akun terkunci? Hubungi pengawas / admin utama.</p>
-              <div class="mt-3 pt-3 border-t border-slate-100 text-[11px] text-slate-500">
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2" role="group" aria-label="Mode penyimpanan akun">
-                  <button type="button" id="btnServerCfg" aria-pressed="${CLOUD_URL ? 'true' : 'false'}" class="text-left px-3 py-2.5 rounded-xl border-2 transition cursor-pointer ${CLOUD_URL ? 'border-emerald-500 bg-emerald-50 text-emerald-900' : 'border-slate-200 bg-white hover:border-emerald-400 text-slate-700'}">
-                    <span class="flex items-center gap-1.5 text-xs font-extrabold"><span aria-hidden="true">${CLOUD_URL ? '\u25cf' : '\u25cb'}</span>Mode Server${CLOUD_URL ? ' (aktif)' : ''}</span>
-                    <span class="block text-[11px] leading-snug mt-0.5 font-medium">Mode server: akun harus sudah ada di server (admin klik Sinkronkan Semua).</span>
-                  </button>
-                  <button type="button" id="btnModeLokal" aria-pressed="${CLOUD_URL ? 'false' : 'true'}" class="text-left px-3 py-2.5 rounded-xl border-2 transition cursor-pointer ${CLOUD_URL ? 'border-slate-200 bg-white hover:border-amber-400 text-slate-700' : 'border-amber-500 bg-amber-50 text-amber-900'}">
-                    <span class="flex items-center gap-1.5 text-xs font-extrabold"><span aria-hidden="true">${CLOUD_URL ? '\u25cb' : '\u25cf'}</span>Mode Lokal${CLOUD_URL ? '' : ' (aktif)'}</span>
-                    <span class="block text-[11px] leading-snug mt-0.5 font-medium">Mode lokal: akun hanya berlaku di browser/perangkat tempat admin membuatnya.</span>
-                  </button>
-                </div>
-                <div id="serverCfgBox" class="hidden mt-2 space-y-1.5">
-                  <input id="srvUrlInput" type="url" value="${CLOUD_URL_DEFAULT ? '' : escapeHtml(CLOUD_URL)}" placeholder="https://script.google.com/macros/s/.../exec" class="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-[11px] font-mono outline-none" />
-                  <div class="flex gap-2"><button type="button" id="btnSrvSave" class="px-3 py-1.5 rounded-lg bg-anbk-blue text-white font-bold cursor-pointer">Simpan &amp; muat ulang</button><button type="button" id="btnSrvClear" class="px-3 py-1.5 rounded-lg bg-slate-100 text-slate-700 font-bold cursor-pointer">Kembali ke mode lokal</button></div>
-                </div>
+              <div class="mt-3 pt-3 border-t border-slate-100 text-[11px]">
+                <div id="serverStatus" class="flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-slate-600" role="status"><span id="serverDot" class="w-2 h-2 rounded-full bg-slate-400"></span><span id="serverStatusText">Menghubungi server…</span></div>
               </div>
             </div>
           </div>
@@ -3719,6 +3722,7 @@
             ${sec('4. Tampilan untuk Siswa')}
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <label class="${chk}"><input id="cfgShowScore" type="checkbox" ${state.showScoreToStudent ? 'checked' : ''} class="w-4 h-4 mt-0.5 rounded text-anbk-blue" /><span><span class="text-xs font-bold text-slate-800 block">Tampilkan skor objektif pada struk hasil</span><span class="text-[11px] text-slate-500">Nonaktif: siswa hanya melihat status terkirim.</span></span></label>
+              <label class="${chk}"><input id="cfgShowLoginToken" type="checkbox" ${state.showLoginToken !== false ? 'checked' : ''} class="w-4 h-4 mt-0.5 rounded text-anbk-blue" /><span><span class="text-xs font-bold text-slate-800 block">Tampilkan token ujian di layar login</span><span class="text-[11px] text-slate-500">Hanya paket yang aktif. Matikan bila token dibagikan langsung oleh pengawas.</span></span></label>
               <label class="${chk}"><input id="cfgShowKd" type="checkbox" ${state.showKdToStudent ? 'checked' : ''} class="w-4 h-4 mt-0.5 rounded text-anbk-blue" /><span><span class="text-xs font-bold text-slate-800 block">Tampilkan kode ATP/KD di soal</span><span class="text-[11px] text-slate-500">Umumnya dimatikan; kode hanya berguna bagi guru.</span></span></label>
             </div>
           </div>
@@ -3785,6 +3789,7 @@
         state.shuffleOptions = document.getElementById('cfgShuffleOpt').checked;
         state.partialScoring = document.getElementById('cfgPartial').checked;
         state.showScoreToStudent = document.getElementById('cfgShowScore').checked;
+        state.showLoginToken = document.getElementById('cfgShowLoginToken').checked;
         state.showKdToStudent = document.getElementById('cfgShowKd').checked;
         state.kktp = Math.max(50, Math.min(100, parseInt(v('cfgKktp'), 10) || 75));
         if (state.autoSoalConfig) delete state.autoSoalConfig.kktpThreshold;
@@ -9197,11 +9202,19 @@ Rubrik: Syarat terurut (5), O(log n) vs O(n) (10), contoh langkah (5).`;
         if (res.user) { window.__cloudUser = res.user; try { sessionStorage.setItem('tritas_admin_user', JSON.stringify(res.user)); } catch (e) { /* abaikan */ } }
         if (res.master) {
           applyPull(res, true);
+          // v13: bank bawaan lama di server (Q1-Q7 utuh) diganti 40 soal Pekan Ulangan, lalu otomatis disimpan kembali
+          { const before = JSON.stringify(masterOf()); try { migrateV9(); migrateV10(); } catch (e) { /* abaikan */ } if (JSON.stringify(masterOf()) !== before) { adminSynced = true; schedulePush(); } }
           adminSynced = true;
           pill('☁ Tersinkron ' + clock(), 'ok');
         } else {
           // Sheet masih kosong: unggah data awal. Guru selain admin utama mulai dari ruang kerja kosong.
           if (res.tid && res.tid !== 'admin') resetWorkspace();
+          else { // admin utama pada server kosong: unggah paket awal (soal, siswa, pengaturan) agar tidak mengunggah bank kosong
+            const f0 = createInitialState();
+            if (!(state.questions || []).length) state.questions = f0.questions;
+            if (!(state.students || []).length) state.students = f0.students;
+            if (!(state.testName || '').trim()) state.testName = f0.testName;
+          }
           base.master = ''; base.st = {}; base.subs = {}; base.logIds = new Set();
           adminSynced = true;
           schedulePush();
@@ -9543,15 +9556,34 @@ Rubrik: Syarat terurut (5), O(log n) vs O(n) (10), contoh langkah (5).`;
           f.replaceWith(nf);
           nf.addEventListener('submit', onLoginSubmit);
         }
-        fetch(CLOUD_URL + '?action=info').then((r) => r.json()).then((info) => {
-          if (!info || !info.ready) return;
+        const stat = (ok, text) => {
+          const box = document.getElementById('serverStatus'), dot = document.getElementById('serverDot'), tx = document.getElementById('serverStatusText');
+          if (!box) return;
+          box.className = 'flex items-center gap-2 px-3 py-2 rounded-xl border ' + (ok === true ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : ok === false ? 'border-rose-300 bg-rose-50 text-rose-800' : 'border-amber-300 bg-amber-50 text-amber-800');
+          if (dot) dot.className = 'w-2 h-2 rounded-full ' + (ok === true ? 'bg-emerald-500' : ok === false ? 'bg-rose-500' : 'bg-amber-500');
+          if (tx) tx.textContent = text;
+        };
+        const tokenRows = (info) => {
+          let a = info.tokens || info.paket || info.pakets;
+          if (!a && info.token) a = [{ token: info.token }];
+          if (a && !Array.isArray(a) && typeof a === 'object') a = Object.keys(a).map((k) => ({ topik: k, token: (a[k] && typeof a[k] === 'object') ? a[k].token : a[k] }));
+          return (Array.isArray(a) ? a : []).filter((x) => x && x.token).map((x) => ({ label: x.topik || x.name || x.label || '', token: String(x.token).toUpperCase() }));
+        };
+        const ctl = new AbortController();
+        const tm = setTimeout(() => ctl.abort(), 12000);
+        fetch(CLOUD_URL + '?action=info', { signal: ctl.signal }).then((r) => r.json()).then((info) => {
+          clearTimeout(tm);
+          if (!info || !info.ready) { stat(null, 'Server tersambung. Belum ada data paket: admin/guru login sekali untuk menyiapkan.'); return; }
+          const nm = document.getElementById('loginPaketName'); if (nm && info.testName) nm.textContent = info.testName;
           const set = (label, val) => c.querySelectorAll('div').forEach((d) => {
             if (d.children.length === 2 && d.children[0].textContent.trim() === label) d.children[1].textContent = val;
           });
-          set('Paket Tes', info.testName);
           set('Alokasi Waktu', Number(info.durationMinutes) + ' Menit');
           set('Total Butir Soal', Number(info.count) + ' Butir');
-        }).catch(() => {});
+          const tb = document.getElementById('loginTokenBox');
+          if (tb) { const rows = tokenRows(info); tb.innerHTML = rows.length ? loginTokenRowsHtml(rows) : ''; }
+          stat(true, 'Terhubung ke server \u2022 data tersinkron otomatis');
+        }).catch(() => { clearTimeout(tm); stat(false, 'Server tidak terjangkau. Periksa koneksi internet, lalu muat ulang halaman.'); });
       };
 
       window.__cloudChangeAdmin = (u, pw) => call('changeAdmin', { key: adminKey, newUser: u, newPass: pw });
