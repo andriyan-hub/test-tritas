@@ -185,7 +185,7 @@
     /**
      * =========================================================================
      * TRITAS TEST — INFORMATIKA (SMA KELAS XI FASE F)
-     * Single-file ANBK-inspired CBT Application + Bank Soal & Pembuat Soal (v13)
+     * Single-file ANBK-inspired CBT Application + Bank Soal & Pembuat Soal (v14)
      * Regulasi: Keputusan Kepala BSKAP Kemendikdasmen No. 046/H/KR/2025
      *           & Panduan Pembelajaran dan Asesmen (PPA) Edisi Revisi 2025
      * =========================================================================
@@ -866,7 +866,7 @@
       return STUDENT_SEED_ROWS.map(([nis, name, kelas]) => ({ nis, name, kelas, status: 'belum', locked: false, violations: 0, violationLogs: [], lastActive: null }));
     }
 
-    // Default seed data for Informatika Kelas XI Fase F (Berdasarkan 046/H/KR/2025)
+    // Default seed data for Informatika Kelas XI Fase F (Algoritma Pencarian & CP 046/H/KR/2025)
     function createInitialState() {
       const initialToken = 'TRITAS';
       return {
@@ -2587,10 +2587,38 @@
             <span>Token:</span>
             <span class="font-mono font-bold tracking-wider text-amber-300">${escapeHtml(state.examToken)}</span>
           </div>
+          ${window.__cloudForcePush ? `<button id="btnSyncServer" type="button" title="Kirim semua data lokal (soal, siswa, pengaturan, hasil) ke server" class="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs sm:text-sm font-semibold transition cursor-pointer">☁ Sinkron ke Server</button>` : ''}
           <button id="btnLogoutAdmin" type="button" class="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs sm:text-sm font-semibold transition cursor-pointer">
             Keluar Admin
           </button>
         `;
+        const btnSync = document.getElementById('btnSyncServer');
+        if (btnSync) btnSync.addEventListener('click', () => {
+          openModal(`
+            <h3 class="text-lg font-bold text-slate-900">Sinkron data lokal ke server</h3>
+            <p class="text-sm text-slate-600 mt-2">Seluruh data di browser ini (bank soal, data siswa, pengaturan, paket ujian, hasil ujian, status siswa, dan log) akan <strong>dikirim dan menimpa data di server</strong> untuk akun ini.</p>
+            <div id="syncProgress" class="hidden mt-3 text-xs font-mono text-slate-700 bg-slate-50 border border-slate-200 rounded-lg p-3"></div>
+            <div class="flex justify-end gap-2 mt-4">
+              <button id="syncCancel" type="button" class="px-4 py-2 rounded-xl border border-slate-300 text-sm font-semibold text-slate-700 cursor-pointer">Batal</button>
+              <button id="syncGo" type="button" class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold cursor-pointer">Kirim Sekarang</button>
+            </div>`);
+          document.getElementById('syncCancel').addEventListener('click', closeModal);
+          document.getElementById('syncGo').addEventListener('click', async () => {
+            const go = document.getElementById('syncGo'), cancel = document.getElementById('syncCancel'), box = document.getElementById('syncProgress');
+            go.disabled = true; cancel.disabled = true; box.classList.remove('hidden');
+            const say = (t) => { box.textContent = t; };
+            try {
+              const r = await window.__cloudForcePush(say);
+              box.innerHTML = 'Selesai.<br>Pengaturan, soal &amp; siswa: ' + r.master + '<br>Status siswa: ' + r.status + '<br>Hasil ujian: ' + r.subs + '<br>Log keamanan: ' + r.logs;
+              showToast('Data lokal berhasil disinkronkan ke server.', 'success');
+            } catch (e) {
+              box.innerHTML = '<span class="text-rose-700 font-bold">Gagal: ' + escapeHtml(e && e.message ? e.message : 'tidak diketahui') + '</span><br>Data lokal tetap aman. Periksa koneksi lalu coba lagi.';
+              showToast('Sinkronisasi gagal.', 'danger');
+            }
+            cancel.textContent = 'Tutup'; cancel.disabled = false;
+            go.textContent = 'Kirim Ulang'; go.disabled = false;
+          });
+        });
         document.getElementById('btnLogoutAdmin').addEventListener('click', async () => {
           const b = document.getElementById('btnLogoutAdmin'); if (b) b.disabled = true;
           try { if (window.__cloudFlush) await window.__cloudFlush(); } catch (e) { /* tetap keluar */ }
@@ -2810,6 +2838,27 @@
         : '<div class="rounded-xl bg-white/10 px-3 py-2 text-slate-300">Belum ada paket ujian yang diaktifkan.</div>';
       return `<div class="space-y-1.5 pt-1"><div class="text-[11px] font-bold uppercase tracking-wider text-sky-300">Token Ujian</div>${body}</div>`;
     }
+    // v14: "Total Butir Soal" di layar login = soal pada paket yang DIAKTIFKAN admin/guru, bukan seluruh isi bank
+    function loginActivePakets() {
+      const cfg = state.topikConfig || {};
+      const names = Object.keys(cfg);
+      if (!names.length) return null; // belum memakai paket per topik: ujian tunggal
+      return names.filter((n) => (cfg[n] || {}).active && questionsForTopik(n).length)
+        .map((n) => ({ name: n, token: String(cfg[n].token || '').toUpperCase(), count: questionsForTopik(n).length, minutes: topikDurationMinutes(n) }));
+    }
+    // v14: alokasi waktu = durasi paket yang diaktifkan (bukan durasi umum); beberapa paket berbeda durasi tampil sebagai rentang
+    function loginActiveMinutesText() {
+      const a = loginActivePakets();
+      if (!a) return String(Number(state.durationMinutes));
+      if (!a.length) return '0';
+      const m = a.map((x) => x.minutes);
+      const lo = Math.min.apply(null, m), hi = Math.max.apply(null, m);
+      return lo === hi ? String(lo) : lo + '\u2013' + hi;
+    }
+    function loginActiveCount() {
+      const a = loginActivePakets();
+      return a ? a.reduce((t, x) => t + x.count, 0) : (state.questions || []).length;
+    }
     function loginTokenHtml() {
       if (state.showLoginToken === false) return '';
       if (CLOUD_URL) return '<div id="loginTokenBox"></div>'; // diisi dari server (lihat renderLoginView mode server)
@@ -2818,7 +2867,7 @@
       let rows = [];
       if (names.length) {
         rows = names.filter((n) => (cfg[n] || {}).active && (cfg[n] || {}).token && questionsForTopik(n).length)
-          .map((n) => ({ label: n, token: String(cfg[n].token).toUpperCase() }));
+          .map((n) => ({ label: n + ' \u00b7 ' + questionsForTopik(n).length + ' soal \u00b7 ' + topikDurationMinutes(n) + ' menit', token: String(cfg[n].token).toUpperCase() }));
       } else if (state.examToken) {
         rows = [{ label: '', token: String(state.examToken).toUpperCase() }];
       }
@@ -2849,8 +2898,8 @@
                 <div class="text-[11px] font-bold uppercase tracking-wider text-sky-300">Informasi Paket Aktif</div>
                 <div id="loginPaketName" class="text-sm font-extrabold leading-snug text-white">${escapeHtml(state.testName)}</div>
                 <div class="grid grid-cols-2 gap-2">
-                  <div class="rounded-xl bg-white/10 px-3 py-2"><div class="text-slate-300">Alokasi Waktu</div><div class="text-base font-extrabold text-white">${Number(state.durationMinutes)} <span class="text-[11px] font-semibold">Menit</span></div></div>
-                  <div class="rounded-xl bg-white/10 px-3 py-2"><div class="text-slate-300">Total Butir Soal</div><div class="text-base font-extrabold text-white">${state.questions.length} <span class="text-[11px] font-semibold">Butir</span></div></div>
+                  <div class="rounded-xl bg-white/10 px-3 py-2"><div class="text-slate-300">Alokasi Waktu</div><div id="loginAlokasiWaktu" class="text-base font-extrabold text-white">${loginActiveMinutesText()} <span class="text-[11px] font-semibold">Menit</span></div></div>
+                  <div class="rounded-xl bg-white/10 px-3 py-2"><div class="text-slate-300">Total Butir Soal</div><div id="loginTotalButir" class="text-base font-extrabold text-white">${loginActiveCount()} <span class="text-[11px] font-semibold">Butir</span></div></div>
                 </div>
                 ${loginTokenHtml()}
               </div>
@@ -4459,6 +4508,14 @@
 
       function keyPreviewHtml(q) { return qKeyPreviewHtml(q); }
 
+      // v14: hapus/ubah massal juga memperingatkan bila topiknya aktif atau sudah dikerjakan siswa (sebelumnya hanya simpan satuan)
+      function useWarnHtml(ids) {
+        const set = new Set(ids); const names = new Set();
+        state.questions.forEach((q) => { if (set.has(q.id)) { const t = topikOf(q); if (topikInUse(t)) names.add(t); } });
+        if (!names.size) return '';
+        return '<p class="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-2">Topik <strong>' + Array.from(names).map(escapeHtml).join(', ') + '</strong> sedang aktif atau sudah dikerjakan siswa. Mengubah atau menghapus soalnya memengaruhi ujian dan membuat nilai yang sudah tersimpan tidak sebanding.</p>';
+      }
+
       function getShown() {
         const qText = String(state.soalSearch || '').trim().toLowerCase();
         const tf = state.soalTypeFilter || 'ALL';
@@ -4473,7 +4530,8 @@
           if (af === 'NONE' && a) return false;
           if (af !== 'ALL' && af !== 'NONE' && a !== af) return false;
           if (qText) {
-            const hay = (String(q.prompt || '') + ' ' + (q.options || []).join(' ') + ' ' + String(q.kd || '')).toLowerCase();
+            const hay = [q.prompt, (q.options || []).join(' '), q.kd, topikOf(q), q.answerText, q.pembahasan,
+              (q.statements || []).map((x) => x.text).join(' '), (q.pairs || []).map((x) => x.left + ' ' + x.right).join(' ')].map((x) => String(x || '')).join(' ').toLowerCase();
             if (!hay.includes(qText)) return false;
           }
           return true;
@@ -4543,6 +4601,7 @@
         document.getElementById('btnBulkTopik').addEventListener('click', () => {
           openModal(`
             <h3 class="text-lg font-bold text-slate-900">Atur Topik ${soalSel.size} Soal</h3>
+            ${useWarnHtml(Array.from(soalSel))}
             <input id="bulkTopikInput" list="qTopikList" type="text" maxlength="80" placeholder="Nama topik (kosongkan = otomatis dari ATP)" class="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm" />
             <div class="flex justify-end gap-2 pt-3">
               <button id="bulkTopikCancel" type="button" class="px-4 py-2 rounded-xl bg-slate-100 text-slate-700 text-sm font-semibold cursor-pointer">Batal</button>
@@ -4563,6 +4622,7 @@
         document.getElementById('btnBulkPoints').addEventListener('click', () => {
           openModal(`
             <h3 class="text-lg font-bold text-slate-900">Ubah Poin ${soalSel.size} Soal</h3>
+            ${useWarnHtml(Array.from(soalSel))}
             <input id="bulkPointsInput" type="number" min="1" max="100" value="10" class="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm font-mono" />
             <div class="flex justify-end gap-2 pt-3">
               <button id="bulkPtsCancel" type="button" class="px-4 py-2 rounded-xl bg-slate-100 text-slate-700 text-sm font-semibold cursor-pointer">Batal</button>
@@ -4583,6 +4643,7 @@
           openModal(`
             <h3 class="text-lg font-bold text-slate-900">Hapus ${soalSel.size} soal terpilih?</h3>
             <p class="text-sm text-slate-600">Soal yang dihapus tidak dapat dikembalikan.</p>
+            ${useWarnHtml(Array.from(soalSel))}
             <label class="flex items-center gap-2 text-sm text-slate-700 cursor-pointer"><input type="checkbox" id="bulkDelBackup" checked class="w-4 h-4 rounded" /> Unduh cadangan soal yang dihapus (.json)</label>
             <div class="flex justify-end gap-2 pt-3">
               <button id="bulkDelCancel" type="button" class="px-4 py-2 rounded-xl bg-slate-100 text-slate-700 text-sm font-semibold cursor-pointer">Batal</button>
@@ -4768,6 +4829,7 @@
             <h3 class="text-lg font-bold text-slate-900">Hapus butir soal ini?</h3>
             <p class="text-sm text-slate-600">${escapeHtml(String((tq && tq.prompt) || '').slice(0, 140))}</p>
             <p class="text-xs text-slate-500">Butir yang dihapus tidak dapat dikembalikan. Cadangan akan diunduh bila kotak di bawah dicentang.</p>
+            ${useWarnHtml([qId])}
             <label class="flex items-center gap-2 text-sm text-slate-700 cursor-pointer"><input type="checkbox" id="delOneBackup" checked class="w-4 h-4 rounded" /> Unduh cadangan butir ini (.json)</label>
             <div class="flex justify-end gap-2 pt-3">
               <button id="delOneCancel" type="button" class="px-4 py-2 rounded-xl bg-slate-100 text-slate-700 text-sm font-semibold cursor-pointer">Batal</button>
@@ -4851,11 +4913,17 @@
 
       document.getElementById('btnExportSoalXlsx').addEventListener('click', () => {
         const exportRows = visibleQuestions().map((q, idx) => questionToExcelRow(q, idx));
+        let cut = 0; // v14: sel Excel maksimal 32.767 karakter; gambar tertanam (data URI) bisa melebihinya dan merusak berkas
+        exportRows.forEach((r) => Object.keys(r).forEach((k) => {
+          if (typeof r[k] === 'string' && r[k].length > 30000) {
+            r[k] = r[k].replace(/\[IMG:data:[^\]]*\]/g, '[IMG:gambar tidak ikut diekspor, gunakan Export .JSON]').slice(0, 30000); cut++;
+          }
+        }));
         const ws = XLSX.utils.json_to_sheet(exportRows);
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, 'BankSoal');
         XLSX.writeFile(wb, 'Bank_Soal_Informatika_Kelas_XI_Fase_F.xlsx');
-        showToast('Bank soal diekspor ke .xlsx', 'success');
+        showToast('Bank soal diekspor ke .xlsx' + (cut ? ' (' + cut + ' sel berisi gambar besar dipangkas; gunakan Export .JSON agar gambar utuh)' : ''), cut ? 'warning' : 'success');
       });
 
       document.getElementById('btnExportSoalJson').addEventListener('click', () => {
@@ -7963,7 +8031,7 @@ Rubrik: Syarat terurut (5), O(log n) vs O(n) (10), contoh langkah (5).`;
             <p class="text-[11px] text-slate-600">Tulis soal di Word atau minta AI (ChatGPT, Gemini, Claude, dll.) membuatnya dengan prompt dari tombol di bawah, lalu unggah/tempel di sini. Hasil bacaan masuk ke <strong>Baki Draf</strong> (tab 2) untuk diperiksa dan disunting dulu, baru dimasukkan ke bank. Soal ganda (isi sama pada topik yang sama) dilewati.</p>
             <div class="flex flex-wrap items-center gap-2">
               <input id="impTopik" list="impTopikList" type="text" maxlength="80" placeholder="Topik default (bila soal tidak mencantumkan Topik:)" class="flex-1 min-w-[220px] px-3 py-2 rounded-xl border border-slate-300 text-sm" />
-              <datalist id="impTopikList">${topikList(visibleQuestions()).map((t) => '<option value="' + escapeHtml(t.name) + '"></option>').join('')}</datalist>
+              <datalist id="impTopikList"></datalist>
               <label class="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold cursor-pointer">Pilih File .docx / .txt<input id="impFile" type="file" accept=".docx,.txt,.md" class="hidden" /></label>
               <button id="impPromptBtn" type="button" class="px-3 py-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-xs font-bold cursor-pointer">Buat Prompt AI</button>
               <button id="impGuideBtn" type="button" class="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold cursor-pointer">Lihat Format &amp; Contoh</button>
@@ -8452,6 +8520,7 @@ Rubrik: Syarat terurut (5), O(log n) vs O(n) (10), contoh langkah (5).`;
       const tray = state.autoSoalDraft;
       const bank = new Set(visibleQuestions().map(qKey));
       const inTray = new Set(tray.map(qKey));
+      const batchId = 'B' + Date.now() + '_' + rndInt(0, 9999); // v14: tiap pembuatan/impor = satu paket yang berdiri sendiri
       let added = 0, dupBank = 0, dupTray = 0;
       (items || []).forEach((q, i) => {
         if (q.topik) q.topik = canonTopik(q.topik);
@@ -8461,7 +8530,7 @@ Rubrik: Syarat terurut (5), O(log n) vs O(n) (10), contoh langkah (5).`;
         const isDup = bank.has(k);
         if (isDup) dupBank++;
         const { owner, ...rest } = q;
-        tray.push({ ...rest, id: 'DRAFT_' + Date.now() + '_' + i + '_' + rndInt(0, 99999), sumber: q.sumber || sumber, selected: !isDup });
+        tray.push({ ...rest, id: 'DRAFT_' + Date.now() + '_' + i + '_' + rndInt(0, 99999), sumber: q.sumber || sumber, batch: batchId, selected: !isDup });
         added++;
       });
       saveState();
@@ -8476,22 +8545,36 @@ Rubrik: Syarat terurut (5), O(log n) vs O(n) (10), contoh langkah (5).`;
       showToast(bits.join('; ') + '.', (added === 0 || dupBank || dupTray || (errs && errs.length) || note) ? 'warning' : 'success');
     };
 
+    // v14: nama topik yang belum dipakai (tanpa memedulikan huruf besar/kecil), agar soal baru tidak menyatu dengan soal lama
+    function usedTopikNames() {
+      const set = new Set();
+      (state.questions || []).forEach((q) => set.add(topikOf(q).toLowerCase()));
+      Object.keys(state.topikConfig || {}).forEach((n) => set.add(String(n).toLowerCase()));
+      (state.submissions || []).forEach((x) => { if (x && x.topik) set.add(String(x.topik).toLowerCase()); });
+      return set;
+    }
+    function uniqueTopikName(base, used) {
+      let name = base, n = 2;
+      while (used.has(name.toLowerCase())) { name = base + ' (' + n + ')'; n++; }
+      used.add(name.toLowerCase());
+      return name;
+    }
     function trayCommit(list) {
       if (!list.length) return;
       const tray = state.autoSoalDraft || [];
       // v9: setiap soal di bank sebaiknya punya topik (materi) sendiri; tanpa itu soal ikut Elemen CP dan paket ujian jadi terlalu lebar
       const noT = list.filter((d) => !d.topik);
       if (noT.length && !window.__trayTopikSkip) {
-        const tl = topikList(visibleQuestions()).map((x) => '<option value="' + escapeHtml(x.name) + '"></option>').join('');
-        openModal(`<h3 class="text-lg font-bold text-slate-900">Beri nama topik untuk ${noT.length} soal</h3>
-          <p class="text-sm text-slate-700">Soal ini belum punya topik, sehingga akan dikelompokkan otomatis menurut Elemen CP. Paket ujian sebaiknya per <strong>materi</strong> (contoh: Algoritma Pencarian), karena token dan nilai siswa mengikuti topik.</p>
+        const tl = '';
+        openModal(`<h3 class="text-lg font-bold text-slate-900">Beri nama paket untuk ${noT.length} soal</h3>
+          <p class="text-sm text-slate-700">Soal ini belum punya topik. Setiap pembuatan/impor soal menjadi <strong>paket yang berdiri sendiri</strong> dan tidak digabung dengan soal lama maupun soal baru lainnya (nama yang sudah ada otomatis diberi nomor, mis. &quot;Algoritma Pencarian (2)&quot;). Token dan nilai siswa mengikuti paket ini.</p>
           <input id="trayTopikInput" list="trayTopikList" type="text" maxlength="80" placeholder="Nama topik / judul ujian" class="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm" /><datalist id="trayTopikList">${tl}</datalist>
-          <div class="flex flex-wrap justify-end gap-2 pt-3"><button id="trayTopikCancel" type="button" class="px-4 py-2 rounded-xl bg-slate-100 text-slate-700 text-sm font-semibold cursor-pointer">Batal</button><button id="trayTopikSkip" type="button" class="px-4 py-2 rounded-xl bg-white border border-slate-300 text-slate-700 text-sm font-semibold cursor-pointer">Tetap otomatis</button><button id="trayTopikOk" type="button" class="px-4 py-2 rounded-xl bg-anbk-blue hover:bg-blue-800 text-white text-sm font-bold cursor-pointer">Terapkan &amp; Masukkan</button></div>`);
+          <div class="flex flex-wrap justify-end gap-2 pt-3"><button id="trayTopikCancel" type="button" class="px-4 py-2 rounded-xl bg-slate-100 text-slate-700 text-sm font-semibold cursor-pointer">Batal</button><button id="trayTopikSkip" type="button" class="px-4 py-2 rounded-xl bg-white border border-slate-300 text-slate-700 text-sm font-semibold cursor-pointer">Nama otomatis</button><button id="trayTopikOk" type="button" class="px-4 py-2 rounded-xl bg-anbk-blue hover:bg-blue-800 text-white text-sm font-bold cursor-pointer">Terapkan &amp; Masukkan</button></div>`);
         document.getElementById('trayTopikCancel').addEventListener('click', closeModal);
         document.getElementById('trayTopikSkip').addEventListener('click', () => { closeModal(); window.__trayTopikSkip = true; try { trayCommit(list); } finally { window.__trayTopikSkip = false; } });
         document.getElementById('trayTopikOk').addEventListener('click', () => {
           const v = canonTopik(document.getElementById('trayTopikInput').value);
-          if (!v) { showToast('Isi nama topik, atau pilih Tetap otomatis.', 'warning'); return; }
+          if (!v) { showToast('Isi nama paket, atau pilih Nama otomatis.', 'warning'); return; }
           noT.forEach((d) => { d.topik = v; });
           saveState(); closeModal(); trayCommit(list);
         });
@@ -8507,16 +8590,29 @@ Rubrik: Syarat terurut (5), O(log n) vs O(n) (10), contoh langkah (5).`;
         document.getElementById('trayBadClose').addEventListener('click', closeModal);
         return;
       }
-      const topics = Array.from(new Set(list.map(topikOf)));
-      const risky = topics.filter((t) => { const c = topikCfg(t); return (c && c.active) || (state.submissions || []).some((x) => String(x.topik || '') === t); });
+      // v14: tiap kelompok (topik + sekali pembuatan/impor) menjadi paket mandiri dengan nama topik unik
+      const usedNames = usedTopikNames();
+      const stampNow = new Date();
+      const pad2 = (n) => String(n).padStart(2, '0');
+      const autoBase = 'Paket Soal ' + pad2(stampNow.getDate()) + '-' + pad2(stampNow.getMonth() + 1) + '-' + stampNow.getFullYear() + ' ' + pad2(stampNow.getHours()) + '.' + pad2(stampNow.getMinutes());
+      const groupName = new Map();
+      list.forEach((d) => {
+        const gk = (d.topik ? topikOf(d) : '') + '||' + (d.batch || '');
+        if (!groupName.has(gk)) groupName.set(gk, uniqueTopikName(d.topik ? topikOf(d) : autoBase, usedNames));
+      });
+      const finalTopik = (d) => groupName.get((d.topik ? topikOf(d) : '') + '||' + (d.batch || ''));
+      const topics = Array.from(groupName.values());
+      const renamedN = Array.from(groupName.keys()).filter((k) => { const b = k.split('||')[0]; return b && groupName.get(k) !== b; }).length;
+      const risky = [];
       const go = () => {
         const cfg = state.autoSoalConfig || {};
         const ids = new Set(list.map((d) => d.id));
         const me = soalOwnerMe();
         if (!state.topikMeta) state.topikMeta = {};
         const mapped = list.map((d, i) => {
-          const { selected, owner, ...rest } = d;
+          const { selected, owner, batch, ...rest } = d;
           const q = { ...rest, prompt: stripLegacyPrefix(rest.prompt), id: 'Q_' + Date.now() + '_' + i + '_' + rndInt(0, 9999) };
+          q.topik = finalTopik(d);
           if (me) q.owner = me;
           if (q.sumber === 'template' || q.sumber === 'dinamis') {
             const t = topikOf(q);
@@ -8532,7 +8628,7 @@ Rubrik: Syarat terurut (5), O(log n) vs O(n) (10), contoh langkah (5).`;
         saveState();
         closeModal();
         renderAdminView();
-        showToast(mapped.length + ' soal dimasukkan ke Bank Soal (topik: ' + topics.join(', ') + ').', 'success');
+        showToast(mapped.length + ' soal dimasukkan ke Bank Soal sebagai paket mandiri (' + topics.join(', ') + ')' + (renamedN ? '; nama yang sudah ada diberi nomor agar tidak tergabung' : '') + '.', 'success');
       };
       if (!risky.length) { go(); return; }
       openModal(`<h3 class="text-lg font-bold text-slate-900">Topik sedang dipakai ujian</h3>
@@ -8706,7 +8802,7 @@ Rubrik: Syarat terurut (5), O(log n) vs O(n) (10), contoh langkah (5).`;
               <select id="genPeng" class="${selCls}">${['Memahami', 'Mengaplikasi', 'Merefleksi'].map((v) => `<option value="${v}" ${cfg.learningExperience === v ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
             <div class="lg:col-span-2"><label for="autoTopikInput" class="block text-xs font-bold text-emerald-900 mb-1">Simpan ke Topik / Judul Ujian</label>
               <input id="autoTopikInput" list="autoTopikList" type="text" maxlength="80" value="${escapeHtml(cfg.topik || '')}" placeholder="Nama materi, mis. Algoritma Pencarian (kosong = ditanyakan saat dimasukkan ke bank)" class="w-full px-3 py-2 rounded-xl border border-emerald-300 bg-emerald-50/50 text-sm" />
-              <datalist id="autoTopikList">${topikList(visibleQuestions()).map((t) => `<option value="${escapeHtml(t.name)}"></option>`).join('')}</datalist></div>
+              <datalist id="autoTopikList"></datalist></div>
           </div>
           <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-[11px] text-slate-700"><strong>Ringkasan CP:</strong> ${selectedEl ? escapeHtml(selectedEl.cpRingkas) : 'Berpikir Komputasional (pencarian &amp; optimasi), Pengembangan Program/Produk Digital, Analisis Data, serta Hukum &amp; Etika Digital Fase F.'}</div>
 
@@ -9135,9 +9231,15 @@ Rubrik: Syarat terurut (5), O(log n) vs O(n) (10), contoh langkah (5).`;
         const s = {};
         Object.keys(state).forEach((k) => { if (SKIP.indexOf(k) < 0) s[k] = state[k]; });
         s.antiCheat = Object.assign({}, state.antiCheat, { logs: [] });
-        return { settings: s, questions: state.questions, students: state.students.map(rosterOf) };
+        // v14: paket ujian (Bank Soal > Paket Ujian & Token) dikirim agar server hanya melayani soal/durasi/token paket yang aktif
+        const pakets = Object.keys(state.topikConfig || {}).map((n) => {
+          const c = state.topikConfig[n] || {};
+          return { name: n, active: !!c.active, token: String(c.token || '').toUpperCase(), duration: topikDurationMinutes(n), mode: topikModeOf(n), qids: questionsForTopik(n).map((q) => q.id) };
+        });
+        return { settings: s, questions: state.questions, students: state.students.map(rosterOf), pakets: pakets };
       }
       const stKey = (s) => JSON.stringify([s.status || 'belum', !!s.locked, Number(s.violations) || 0]);
+      const subKey = (s) => String(s.nis) + (s.topik ? '||' + s.topik : ''); // v14: satu hasil per siswa per paket
       const base = { master: '', st: {}, subs: {}, logIds: new Set() };
       let pushTimer = null, pushing = false, dirty = false, dirtySeq = 0, lastSig = '';
 
@@ -9171,7 +9273,7 @@ Rubrik: Syarat terurut (5), O(log n) vs O(n) (10), contoh langkah (5).`;
         base.st = {};
         state.students.forEach((s) => { base.st[s.nis] = stKey(s); });
         base.subs = {};
-        state.submissions.forEach((s) => { base.subs[String(s.nis)] = JSON.stringify(s); });
+        state.submissions.forEach((s) => { base.subs[subKey(s)] = JSON.stringify(s); });
         base.logIds = new Set((res.logs || []).map((l) => l.id));
         base.master = JSON.stringify(masterOf());
       }
@@ -9195,6 +9297,78 @@ Rubrik: Syarat terurut (5), O(log n) vs O(n) (10), contoh langkah (5).`;
         if (dirty || pushing) { for (let i = 0; i < 3 && (dirty || pushing); i++) { await doPush(); await sleep(300); } }
       };
       window.__cloudGuru = (action, payload) => call(action, Object.assign({ key: adminKey }, payload || {}));
+
+      // Kirim paksa SEMUA data lokal ke server (tanpa membandingkan dengan base), dipecah per bagian agar tidak terlalu besar.
+      window.__cloudForcePush = async function (onProgress) {
+        if (!adminKey || !adminSynced) throw new Error('Belum login ke server. Login ulang sebagai admin/guru.');
+        const say = (t) => { try { if (onProgress) onProgress(t); } catch (e) { /* abaikan */ } };
+        if (pushTimer) { clearTimeout(pushTimer); pushTimer = null; }
+        for (let i = 0; i < 100 && pushing; i++) await sleep(200);
+        if (pushing) throw new Error('Penyimpanan otomatis masih berjalan, coba lagi sebentar.');
+        pushing = true;
+        const seq = dirtySeq;
+        const blank = () => ({ key: adminKey, statusPatches: [], subUpserts: [], subDeletes: [], newLogs: [], clearLogs: false });
+        const send = async (p, label) => {
+          say('Mengirim ' + label + '…');
+          let res;
+          try { res = await call('adminPush', p, 60000); } catch (e) { throw new Error('Server tidak terjangkau saat mengirim ' + label + '.'); }
+          if (!res || !res.ok) {
+            if (isAuthErr(res)) { sessionExpired(); throw new Error('Sesi berakhir, login ulang.'); }
+            throw new Error((res && res.error) || ('Gagal mengirim ' + label + '.'));
+          }
+        };
+        const chunk = (a, n) => { const o = []; for (let i = 0; i < a.length; i += n) o.push(a.slice(i, i + n)); return o; };
+        const out = { master: '-', status: '-', subs: '-', logs: '-' };
+        try {
+          // 1) pengaturan + bank soal + data siswa + paket
+          const m = masterOf();
+          const mj = JSON.stringify(m);
+          const p1 = blank(); p1.master = m;
+          await send(p1, 'pengaturan, soal & siswa (' + (m.questions || []).length + ' soal, ' + (m.students || []).length + ' siswa)');
+          base.master = mj;
+          out.master = (m.questions || []).length + ' soal, ' + (m.students || []).length + ' siswa terkirim';
+
+          // 2) status siswa (belum/sedang/selesai, terkunci, pelanggaran)
+          const st = state.students.map((s) => ({ nis: s.nis, status: s.status || 'belum', locked: !!s.locked, violations: Number(s.violations) || 0, violationLogs: s.violationLogs || [] }));
+          let n = 0;
+          for (const part of chunk(st, 150)) {
+            const p = blank(); p.statusPatches = part;
+            await send(p, 'status siswa ' + (n + part.length) + '/' + st.length);
+            part.forEach((x) => { base.st[x.nis] = stKey(x); });
+            n += part.length;
+          }
+          out.status = n + ' siswa';
+
+          // 3) hasil ujian
+          const subs = state.submissions.slice();
+          n = 0;
+          for (const part of chunk(subs, 20)) {
+            const p = blank(); p.subUpserts = part;
+            await send(p, 'hasil ujian ' + (n + part.length) + '/' + subs.length);
+            part.forEach((x) => { base.subs[subKey(x)] = JSON.stringify(x); });
+            n += part.length;
+          }
+          out.subs = n + ' hasil';
+
+          // 4) log keamanan yang belum ada di server
+          const logs = (state.antiCheat.logs || []).filter((l) => !base.logIds.has(l.id));
+          if (logs.length) {
+            const p = blank(); p.newLogs = logs;
+            await send(p, 'log keamanan (' + logs.length + ')');
+            logs.forEach((l) => base.logIds.add(l.id));
+          }
+          out.logs = logs.length + ' log baru';
+
+          if (seq === dirtySeq) dirty = false;
+          pill('☁ Tersimpan ' + clock(), 'ok');
+          return out;
+        } catch (e) {
+          pill('⚠ Sinkron ke server gagal', 'err');
+          throw e;
+        } finally {
+          pushing = false;
+        }
+      };
 
       async function initialAdminPull() {
         const res = await call('adminPull', { key: adminKey });
@@ -9245,7 +9419,7 @@ Rubrik: Syarat terurut (5), O(log n) vs O(n) (10), contoh langkah (5).`;
             }
           });
           const cur = {};
-          state.submissions.forEach((s) => { cur[String(s.nis)] = s; });
+          state.submissions.forEach((s) => { cur[subKey(s)] = s; });
           Object.keys(cur).forEach((n) => { if (base.subs[n] !== JSON.stringify(cur[n])) p.subUpserts.push(cur[n]); });
           p.subDeletes = Object.keys(base.subs).filter((n) => !cur[n]);
           const logs = state.antiCheat.logs || [];
@@ -9264,7 +9438,7 @@ Rubrik: Syarat terurut (5), O(log n) vs O(n) (10), contoh langkah (5).`;
           }
           if (p.master) base.master = mj;
           p.statusPatches.forEach((x) => { base.st[x.nis] = stKey(x); });
-          p.subUpserts.forEach((s) => { base.subs[String(s.nis)] = JSON.stringify(s); });
+          p.subUpserts.forEach((s) => { base.subs[subKey(s)] = JSON.stringify(s); });
           p.subDeletes.forEach((n) => { delete base.subs[n]; });
           if (p.clearLogs) base.logIds = new Set();
           p.newLogs.forEach((l) => base.logIds.add(l.id));
@@ -9516,7 +9690,7 @@ Rubrik: Syarat terurut (5), O(log n) vs O(n) (10), contoh langkah (5).`;
             activeExam = {
               nis: identifier, studentName: res.student.name, kelas: res.student.kelas,
               startTime: now, endTime: now + res.remainingMs, lastTickEpoch: now, remainingMs: res.remainingMs,
-              lockedByAntiCheat: false, lockReason: '', currentIndex: 0,
+              lockedByAntiCheat: false, lockReason: '', currentIndex: 0, topik: ex.topik || '', mode: ex.mode || 'ujian',
               questionOrder: order, optionMaps: optionMaps, answers: res.answers || {}, flaggedQuestions: {},
               fontSize: 'md', violations: res.violations || 0,
               lastSavedAt: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
@@ -9567,7 +9741,12 @@ Rubrik: Syarat terurut (5), O(log n) vs O(n) (10), contoh langkah (5).`;
           let a = info.tokens || info.paket || info.pakets;
           if (!a && info.token) a = [{ token: info.token }];
           if (a && !Array.isArray(a) && typeof a === 'object') a = Object.keys(a).map((k) => ({ topik: k, token: (a[k] && typeof a[k] === 'object') ? a[k].token : a[k] }));
-          return (Array.isArray(a) ? a : []).filter((x) => x && x.token).map((x) => ({ label: x.topik || x.name || x.label || '', token: String(x.token).toUpperCase() }));
+          return (Array.isArray(a) ? a : []).filter((x) => x && x.token).map((x) => {
+            const n = [x.count, x.soal, x.jumlah, x.butir, x.questions].map(Number).find((v) => v > 0);
+            const nm = x.topik || x.name || x.label || '';
+            const d = Number(x.duration) > 0 ? Number(x.duration) : 0;
+            return { label: nm && n ? nm + ' \u00b7 ' + n + ' soal' + (d ? ' \u00b7 ' + d + ' menit' : '') : nm, token: String(x.token).toUpperCase(), n: n || 0 };
+          });
         };
         const ctl = new AbortController();
         const tm = setTimeout(() => ctl.abort(), 12000);
@@ -9578,10 +9757,12 @@ Rubrik: Syarat terurut (5), O(log n) vs O(n) (10), contoh langkah (5).`;
           const set = (label, val) => c.querySelectorAll('div').forEach((d) => {
             if (d.children.length === 2 && d.children[0].textContent.trim() === label) d.children[1].textContent = val;
           });
-          set('Alokasi Waktu', Number(info.durationMinutes) + ' Menit');
-          set('Total Butir Soal', Number(info.count) + ' Butir');
+          set('Alokasi Waktu', (info.durationText || Number(info.durationMinutes)) + ' Menit');
+          const rowsAll = tokenRows(info);
+          const sumAktif = rowsAll.reduce((t, r) => t + r.n, 0); // jumlah soal paket aktif bila server menyertakannya per paket
+          set('Total Butir Soal', (sumAktif > 0 ? sumAktif : Number(info.count)) + ' Butir');
           const tb = document.getElementById('loginTokenBox');
-          if (tb) { const rows = tokenRows(info); tb.innerHTML = rows.length ? loginTokenRowsHtml(rows) : ''; }
+          if (tb) { tb.innerHTML = rowsAll.length ? loginTokenRowsHtml(rowsAll) : ''; }
           stat(true, 'Terhubung ke server \u2022 data tersinkron otomatis');
         }).catch(() => { clearTimeout(tm); stat(false, 'Server tidak terjangkau. Periksa koneksi internet, lalu muat ulang halaman.'); });
       };
