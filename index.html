@@ -8791,6 +8791,177 @@ print(cek_palindrom("Kasur Rusak"))  # Output saat ini: False (BUG!)</code></pre
       if (window.lucide) lucide.createIcons();
     }
 
+
+    // =========================================================================
+    // 9b. SINKRONISASI GOOGLE APPS SCRIPT (senyap: tanpa layar loading & tanpa pesan error)
+    //     Aplikasi tetap langsung tampil dari data lokal; sinkron berjalan di latar belakang.
+    // =========================================================================
+    const GS_URL = 'https://script.google.com/a/macros/smkn4-tsm.sch.id/s/AKfycbwc1UK4LAyZ59s0fp8KzkuCXG53WWwfRUCzpipq6dJx15_4M_IIDieoS1Iohaeskp42dA/exec'; // <- TEMPEL URL Web App (.../exec) di sini
+    (function gsSync() {
+      if (!GS_URL || !/^https:\/\//.test(GS_URL)) return;
+      const MK = 'tritas_gs_meta_v1';
+      const KEYS = PX_KEYS.filter(k => k !== 'students').concat(['auditLog']);
+      let meta = null;
+      try { meta = JSON.parse(localStorage.getItem(MK) || 'null'); } catch (e) {}
+      if (!meta || typeof meta !== 'object') meta = { init: false, ver: -1, kt: {}, kh: {}, sh: {}, sids: '' };
+      meta.kt = meta.kt || {}; meta.kh = meta.kh || {}; meta.sh = meta.sh || {};
+
+      const H = s => { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0; return h + ':' + s.length; };
+      const ser = v => JSON.stringify(v === undefined ? null : v, (k, x) => k === 'rt' ? undefined : x);
+      const keyStr = k => ser(k === 'auditLog' ? state.auditLog : state[k]);
+      const idsHash = list => H((list || []).map(s => s.id).sort().join(','));
+      const saveMeta = () => { try { localStorage.setItem(MK, JSON.stringify(meta)); } catch (e) {} };
+      const inExam = () => !!(state.studentSession && state.studentSession.step === 'exam');
+
+      async function req(url, opt) {
+        const ctl = new AbortController();
+        const to = setTimeout(() => ctl.abort(), 30000);
+        try {
+          const res = await fetch(url, Object.assign({ signal: ctl.signal, redirect: 'follow' }, opt || {}));
+          return JSON.parse(await res.text());
+        } catch (e) { return null; } finally { clearTimeout(to); }
+      }
+
+      let pending = false, timer = 0, busy = false, fails = 0, needRender = false;
+
+      function rerender() {
+        const a = document.activeElement;
+        const typing = a && (/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) || a.isContentEditable);
+        if (typing || inExam()) { needRender = true; return; }
+        needRender = false;
+        try { renderApp(); } catch (e) {}
+      }
+
+      function schedule(ms) {
+        clearTimeout(timer);
+        timer = setTimeout(push, ms === undefined ? 2500 : ms);
+      }
+
+      async function push() {
+        if (busy || !meta.init) return;
+        busy = true;
+        try {
+          const keys = {}, sent = {};
+          KEYS.forEach(k => {
+            const s = keyStr(k), h = H(s);
+            if (meta.kh[k] !== h) { keys[k] = { t: Date.now(), v: s }; sent[k] = h; }
+          });
+          const sidsNow = idsHash(state.students);
+          let patch = null; const shSent = {};
+          if (meta.sids !== sidsNow) {
+            keys.students = { t: Date.now(), v: ser(state.students) };
+            state.students.forEach(st => { shSent[st.id] = H(ser(st)); });
+          } else {
+            state.students.forEach(st => {
+              const h = H(ser(st));
+              if (meta.sh[st.id] !== h) { (patch = patch || {})[st.id] = JSON.parse(ser(st)); shSent[st.id] = h; }
+            });
+          }
+          if (!Object.keys(keys).length && !patch) { fails = 0; return; }
+          const r = await req(GS_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({ keys, patch, dsv: STUDENT_DATASET_VERSION })
+          });
+          if (r && r.ok) {
+            const rej = r.rejected || [];
+            Object.keys(sent).forEach(k => {
+              if (rej.indexOf(k) === -1) { meta.kh[k] = sent[k]; meta.kt[k] = keys[k].t; }
+            });
+            if (keys.students && rej.indexOf('students') === -1) meta.sids = sidsNow;
+            if (rej.indexOf('students') === -1) Object.assign(meta.sh, shSent);
+            if (r.prevVersion === meta.ver) meta.ver = r.version;
+            saveMeta(); fails = 0;
+            if (rej.length) schedule(1500);
+          } else { fails++; }
+        } catch (e) { fails++; }
+        finally {
+          busy = false;
+          if (fails) schedule(Math.min(60000, 3000 * Math.pow(2, Math.min(fails, 5))));
+        }
+      }
+
+      async function pull() {
+        if (busy) return;
+        const r = await req(GS_URL + '?action=get' + (meta.init ? '&since=' + meta.ver : '') + '&_=' + Date.now());
+        if (!r || !r.ok || !r.changed) { if (r && r.ok && !meta.init) { meta.init = true; saveMeta(); schedule(300); } return; }
+        if (inExam()) return;
+        const rk = r.keys || {};
+        let changed = false;
+
+        KEYS.forEach(k => {
+          const rem = rk[k];
+          if (!rem) return;
+          const clean = H(keyStr(k)) === meta.kh[k];
+          if (!meta.init || (rem.t > (meta.kt[k] || 0) && clean)) {
+            try {
+              const v = JSON.parse(rem.v);
+              if (k === 'auditLog') { state.auditLog = Array.isArray(v) ? v : []; }
+              else if (v !== null && v !== undefined) { state[k] = v; }
+              meta.kh[k] = H(keyStr(k)); meta.kt[k] = rem.t; changed = true;
+            } catch (e) {}
+          }
+        });
+
+        const rs = rk.students;
+        const dsvOk = rk.dsv ? rk.dsv.v === STUDENT_DATASET_VERSION : true;
+        if (rs && dsvOk) {
+          try {
+            const R = JSON.parse(rs.v);
+            if (Array.isArray(R)) {
+              const L = new Map(state.students.map(s => [s.id, s]));
+              const seen = new Set(), out = [];
+              R.forEach(rem => {
+                if (!rem || !rem.id) return;
+                seen.add(rem.id);
+                const loc = L.get(rem.id);
+                if (loc) {
+                  const lh = H(ser(loc));
+                  if (meta.init && lh !== meta.sh[rem.id]) { out.push(loc); return; }   // perubahan lokal belum terkirim
+                  if (lh === H(ser(rem))) { out.push(loc); meta.sh[rem.id] = lh; return; }
+                }
+                out.push(rem); meta.sh[rem.id] = H(ser(rem));
+              });
+              L.forEach((loc, id) => {
+                if (!seen.has(id) && meta.init && H(ser(loc)) !== meta.sh[id]) out.push(loc);
+              });
+              if (H(ser(out)) !== H(ser(state.students))) { state.students = sortStudentsByName(out); changed = true; }
+              meta.sids = idsHash(R);
+            }
+          } catch (e) {}
+        }
+
+        meta.init = true;
+        meta.ver = r.version;
+        saveMeta();
+        if (changed) {
+          try {
+            localStorage.setItem('tritas_cbt_studio_v2', pxSnap());
+            localStorage.setItem('tritas_cbt_audit_v2', JSON.stringify(state.auditLog));
+          } catch (e) {}
+          rerender();
+        }
+        schedule(300);
+      }
+
+      // Hook penyimpanan lokal -> jadwalkan kirim ke Google Sheets
+      const origSave = pxSave;
+      pxSave = function () { origSave.apply(this, arguments); schedule(); };
+      const origLog = pxLog;
+      pxLog = function () { const x = origLog.apply(this, arguments); schedule(); return x; };
+
+      const tick = () => {
+        if (document.hidden || navigator.onLine === false) return;
+        pull().catch(() => {});
+        if (needRender) rerender();
+      };
+      setInterval(tick, 20000 + Math.floor(Math.random() * 5000));
+      document.addEventListener('visibilitychange', () => { if (document.hidden) schedule(0); else tick(); });
+      window.addEventListener('online', () => { tick(); schedule(500); });
+      window.addEventListener('pagehide', () => { schedule(0); });
+      setTimeout(() => { pull().catch(() => {}); }, 400);
+    })();
+
     // =========================================================================
     // 10. INITIAL BOOTSTRAP
     // =========================================================================
